@@ -1,0 +1,11 @@
+WorkerID,WorkerName,Skills,AvailableSlots,MaxLoadPerPhase,WorkerGroup,QualificationLevel
+W1,Worker1,"data,analysis","[1,2,3]",2,GroupA,4
+W2,Worker2,"coding,ml","[2,4,5]",1,GroupB,5
+W3,Worker3,"testing,ui/ux","[1,4]",3,GroupC,3
+W4,Worker4,"reporting,devops","[3,5]",2,GroupA,2
+W5,Worker5,"design,testing","[2,3,4]",1,GroupB,4
+W6,Worker6,"data,coding","[1,2,5]",2,GroupC,1
+W7,Worker7,"ml,analysis","[3,4,5]",3,GroupA,5
+W8,Worker8,"coding,devops","[1,3]",1,GroupB,3
+W9,Worker9,"reporting,analysis","[2,4]",2,GroupC,2
+W10,Worker10,"ui/ux,design","[4,5]",1,GroupA,2

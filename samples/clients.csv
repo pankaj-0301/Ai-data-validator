@@ -1,0 +1,11 @@
+ClientID,ClientName,PriorityLevel,RequestedTaskIDs,GroupTag,AttributesJSON
+C1,Acme Corp,3,"T17,T27,T33,T31,T20,T3,T32,T26",GroupA,"{""location"":""New York"",""budget"":100000}"
+C2,Globex Inc,1,"T35,T39,T10,T17,T46",GroupB,"{""message"":""ensure deliverables align with project scope"",""location"":""London"",""budget"":56000}"
+C3,Initech,4,"T28,T7,T23,T40,T41,T31,T36,T21,T50,T14",GroupA,"{""sla"":""24h"",""vip"":true}"
+C4,Umbrella Co,5,"T22,T1,T43,T21,T32,T41,T16,T5,T40,T13",GroupC,"{""message"":""budget approved pending CFO review"",""location"":""Mumbai"",""budget"":112000}"
+C5,Stark Industries,2,"T36,T32,T8,T47,T7,T19,T20",GroupB,"{""notes"":""rush order"",""budget"":200000}"
+C6,Wayne Enterprises,5,"T19,T16,T13,T40,T37,T46,T21,T3,T12",GroupA,"{""message"":""client prefers morning meetings"",""location"":""Tokyo"",""budget"":85000}"
+C7,Soylent Corp,4,"T14,T38,T44,T35,T26,T18,T46,T16,T34,T47",GroupC,"{""location"":""London"",""priority"":""high""}"
+C8,Hooli,3,"T13,T15,T8,T18,T22,T2,T24,T16",GroupA,"{""message"":""escalate any delays immediately"",""location"":""San Francisco"",""budget"":189000}"
+C9,Massive Dynamic,1,"T35,T44,T39,T5,T41",GroupB,"{""region"":""APAC"",""budget"":150000}"
+C10,Cyberdyne Systems,2,"T39,T3,T13,T50,T8,T2,T24,T26,T6",GroupC,"{""message"":""verify all entries for compliance"",""location"":""Paris"",""budget"":158000}"
