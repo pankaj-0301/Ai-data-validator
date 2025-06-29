@@ -1,4 +1,4 @@
-# Data Alchemist - AI Resource Allocation Configurator
+# Data  - AI Resource Allocation Configurator
 
 A Next.js application that uses Gemini AI to help configure and validate resource allocation data.
 
@@ -71,7 +71,3 @@ A Next.js application that uses Gemini AI to help configure and validate resourc
 - `samples/`: Sample CSV files for testing
 - `components.json`: UI component configuration
 - `tailwind.config.ts`: Tailwind CSS configuration
-
-## Security Note
-
-The `.env.local` file is automatically ignored by git to keep your API key secure. Never commit API keys to version control. 
