@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Upload, FileText, Settings, Download, CheckCircle, AlertTriangle, XCircle, Sparkles, Brain, Search, Edit, Save, X, RotateCcw, Target } from 'lucide-react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
@@ -64,6 +64,7 @@ class GeminiAI {
     }
 
     try {
+      console.log('Making Gemini API request...')
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${this.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -72,18 +73,36 @@ class GeminiAI {
         })
       })
       
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Gemini API Error:', response.status, errorText)
+        throw new Error(`API request failed: ${response.status} ${errorText}`)
+      }
+      
       const data = await response.json()
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || 'AI response unavailable'
+      console.log('Gemini API response:', data)
+      
+      const result = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!result) {
+        console.error('No content in Gemini response:', data)
+        throw new Error('No content in API response')
+      }
+      
+      return result
     } catch (error) {
       console.error('Gemini AI Error:', error)
       return 'AI temporarily unavailable'
     }
   }
 
-  async searchData(query: string, data: any): Promise<any[]> {
+  async searchData(query: string, data: any): Promise<{results: any[], source: 'ai' | 'local'}> {
     if (!query.trim() || data.length === 0) {
-      return []
+      console.log('Search skipped: empty query or no data')
+      return { results: [], source: 'local' }
     }
+
+    console.log('Starting AI search for:', query)
+    console.log('Data length:', data.length)
 
     const prompt = `
     Search this data based on the query: "${query}"
@@ -110,17 +129,27 @@ class GeminiAI {
 
     try {
       const response = await this.generateContent(prompt)
+      console.log('Raw AI response:', response)
+      
+      if (response === 'API key not configured' || response === 'AI temporarily unavailable') {
+        throw new Error(response)
+      }
+      
       const cleanedResponse = response.replace(/```json|```/g, '').trim()
+      console.log('Cleaned response:', cleanedResponse)
       
       // Try to parse the response
       let parsedResults
       try {
         parsedResults = JSON.parse(cleanedResponse)
-      } catch {
+        console.log('Successfully parsed JSON:', parsedResults)
+      } catch (parseError) {
+        console.log('JSON parse failed, trying to extract JSON:', parseError)
         // If JSON parsing fails, try to extract JSON from the response
         const jsonMatch = cleanedResponse.match(/\[[\s\S]*\]/)
         if (jsonMatch) {
           parsedResults = JSON.parse(jsonMatch[0])
+          console.log('Extracted JSON from response:', parsedResults)
         } else {
           throw new Error('No valid JSON found in response')
         }
@@ -128,18 +157,22 @@ class GeminiAI {
       
       // Ensure we have an array
       if (Array.isArray(parsedResults)) {
-        return parsedResults.slice(0, 20) // Limit results
+        console.log(`AI search successful: found ${parsedResults.length} results`)
+        return { results: parsedResults.slice(0, 20), source: 'ai' } // Limit results
       } else {
         throw new Error('Response is not an array')
       }
     } catch (error) {
       console.error('AI search failed, falling back to local search:', error)
       // Fallback to local search
-      return data.filter((item: any) => {
+      const localResults = data.filter((item: any) => {
         const searchLower = query.toLowerCase()
         const itemString = JSON.stringify(item).toLowerCase()
         return itemString.includes(searchLower)
       }).slice(0, 20)
+      
+      console.log(`Local search found ${localResults.length} results`)
+      return { results: localResults, source: 'local' }
     }
   }
 
@@ -462,6 +495,8 @@ export default function DataAlchemist() {
   const [isSearching, setIsSearching] = useState(false)
   const [isGeneratingFixes, setIsGeneratingFixes] = useState(false)
   const [showFixesSuccess, setShowFixesSuccess] = useState(false)
+  const [apiKeyStatus, setApiKeyStatus] = useState<'checking' | 'missing' | 'valid' | 'error'>('checking')
+  const [searchSource, setSearchSource] = useState<'ai' | 'local' | null>(null)
   
   // Priority weights
   const [priorityWeights, setPriorityWeights] = useState({
@@ -477,6 +512,19 @@ export default function DataAlchemist() {
     workers: useRef<HTMLInputElement>(null),
     tasks: useRef<HTMLInputElement>(null)
   }
+
+  // Check API key status on component mount
+  useEffect(() => {
+    const checkApiKey = () => {
+      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY
+      if (!apiKey) {
+        setApiKeyStatus('missing')
+      } else {
+        setApiKeyStatus('valid')
+      }
+    }
+    checkApiKey()
+  }, [])
 
   const handleFileUpload = useCallback(async (file: File, type: 'clients' | 'workers' | 'tasks') => {
     setIsProcessing(true)
@@ -518,6 +566,7 @@ export default function DataAlchemist() {
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([])
+      setSearchSource(null)
       return
     }
     
@@ -525,10 +574,12 @@ export default function DataAlchemist() {
     try {
       const allData = [...clients, ...workers, ...tasks]
       const results = await geminiAI.searchData(searchQuery, allData)
-      setSearchResults(results)
+      setSearchResults(results.results)
+      setSearchSource(results.source)
     } catch (error) {
       console.error('Search error:', error)
       setSearchResults([])
+      setSearchSource(null)
     } finally {
       setIsSearching(false)
     }
@@ -540,23 +591,143 @@ export default function DataAlchemist() {
     
     if (!value.trim()) {
       setSearchResults([])
+      setSearchSource(null)
       return
     }
     
-    // Simple local search for immediate feedback
+    // Enhanced local search for immediate feedback
     const allData = [...clients, ...workers, ...tasks]
+    console.log('Local search - data length:', allData.length)
+    console.log('Search query:', value)
+    
     const localResults = allData.filter((item: any) => {
       const searchLower = value.toLowerCase()
       const itemString = JSON.stringify(item).toLowerCase()
-      return itemString.includes(searchLower)
+      
+      // Basic text search
+      if (itemString.includes(searchLower)) {
+        return true
+      }
+      
+      // Handle numeric comparisons for tasks
+      if (item.TaskID && item.Duration !== undefined) {
+        // Check for "duration > X" pattern
+        const durationMatch = searchLower.match(/duration\s*([><=])\s*(\d+)/)
+        if (durationMatch) {
+          const operator = durationMatch[1]
+          const value = parseInt(durationMatch[2])
+          const duration = parseInt(item.Duration)
+          
+          switch (operator) {
+            case '>':
+              return duration > value
+            case '<':
+              return duration < value
+            case '=':
+              return duration === value
+            default:
+              return false
+          }
+        }
+      }
+      
+      // Handle priority searches for clients
+      if (item.ClientID && item.PriorityLevel !== undefined) {
+        const priorityMatch = searchLower.match(/priority\s*([><=])\s*(\d+)/)
+        if (priorityMatch) {
+          const operator = priorityMatch[1]
+          const value = parseInt(priorityMatch[2])
+          const priority = parseInt(item.PriorityLevel)
+          
+          switch (operator) {
+            case '>':
+              return priority > value
+            case '<':
+              return priority < value
+            case '=':
+              return priority === value
+            default:
+              return false
+          }
+        }
+      }
+      
+      // Handle skill searches for workers
+      if (item.WorkerID && Array.isArray(item.Skills)) {
+        const skillMatch = searchLower.match(/skills?\s+(.+)/)
+        if (skillMatch) {
+          const requiredSkill = skillMatch[1].trim()
+          return item.Skills.some((skill: string) => 
+            skill.toLowerCase().includes(requiredSkill)
+          )
+        }
+      }
+      
+      // Handle skill searches for tasks
+      if (item.TaskID && Array.isArray(item.RequiredSkills)) {
+        const skillMatch = searchLower.match(/skills?\s+(.+)/)
+        if (skillMatch) {
+          const requiredSkill = skillMatch[1].trim()
+          return item.RequiredSkills.some((skill: string) => 
+            skill.toLowerCase().includes(requiredSkill)
+          )
+        }
+      }
+      
+      return false
     }).slice(0, 10) // Limit to 10 results for performance
     
+    console.log('Local search results:', localResults.length)
     setSearchResults(localResults)
+    setSearchSource('local')
   }
 
   const clearSearch = () => {
     setSearchQuery('')
     setSearchResults([])
+    setSearchSource(null)
+  }
+
+  const loadSampleData = async () => {
+    setIsProcessing(true)
+    try {
+      // Load sample CSV files
+      const [clientsResponse, workersResponse, tasksResponse] = await Promise.all([
+        fetch('/samples/clients.csv'),
+        fetch('/samples/workers.csv'),
+        fetch('/samples/tasks.csv')
+      ])
+      
+      const clientsText = await clientsResponse.text()
+      const workersText = await workersResponse.text()
+      const tasksText = await tasksResponse.text()
+      
+      // Parse CSV data
+      const clientsData = Papa.parse(clientsText, { header: true }).data
+      const workersData = Papa.parse(workersText, { header: true }).data
+      const tasksData = Papa.parse(tasksText, { header: true }).data
+      
+      // Normalize data
+      const normalizedClients = normalizeData(clientsData, 'clients')
+      const normalizedWorkers = normalizeData(workersData, 'workers')
+      const normalizedTasks = normalizeData(tasksData, 'tasks')
+      
+      // Set data
+      setClients(normalizedClients as Client[])
+      setWorkers(normalizedWorkers as Worker[])
+      setTasks(normalizedTasks as Task[])
+      
+      // Run validation
+      setTimeout(() => {
+        const newErrors = validateData(normalizedClients as Client[], normalizedWorkers as Worker[], normalizedTasks as Task[])
+        setErrors(newErrors)
+        setIsProcessing(false)
+      }, 1000)
+      
+    } catch (error) {
+      console.error('Error loading sample data:', error)
+      setIsProcessing(false)
+    }
   }
 
   const handleCreateRule = async () => {
@@ -639,6 +810,71 @@ export default function DataAlchemist() {
     // Re-run validation
     const newErrors = validateData(clients, workers, tasks)
     setErrors(newErrors)
+  }
+
+  const handleCellEdit = (entityId: string, field: string, newValue: any) => {
+    // Helper function to normalize field values based on field type
+    const normalizeFieldValue = (field: string, value: any) => {
+      if (field === 'RequestedTaskIDs') {
+        if (Array.isArray(value)) return value
+        if (typeof value === 'string') {
+          return value.split(',').map((s: string) => s.trim()).filter(Boolean)
+        }
+        return []
+      }
+      if (field === 'Skills' || field === 'RequiredSkills') {
+        if (Array.isArray(value)) return value
+        if (typeof value === 'string') {
+          return value.split(',').map((s: string) => s.trim()).filter(Boolean)
+        }
+        return []
+      }
+      if (field === 'AvailableSlots' || field === 'PreferredPhases') {
+        if (Array.isArray(value)) return value
+        if (typeof value === 'string') {
+          try {
+            return JSON.parse(value)
+          } catch {
+            return value.split(',').map((s: string) => parseInt(s.trim())).filter(n => !isNaN(n))
+          }
+        }
+        return []
+      }
+      if (field === 'PriorityLevel' || field === 'QualificationLevel' || field === 'Duration' || field === 'MaxLoadPerPhase' || field === 'MaxConcurrent') {
+        const numValue = parseInt(value)
+        return isNaN(numValue) ? 1 : numValue
+      }
+      return value
+    }
+
+    // Apply the edit to the data
+    if (clients.find(c => c.ClientID === entityId)) {
+      setClients(clients.map(c => 
+        c.ClientID === entityId 
+          ? { ...c, [field]: normalizeFieldValue(field, newValue) }
+          : c
+      ))
+    } else if (workers.find(w => w.WorkerID === entityId)) {
+      setWorkers(workers.map(w => 
+        w.WorkerID === entityId 
+          ? { ...w, [field]: normalizeFieldValue(field, newValue) }
+          : w
+      ))
+    } else if (tasks.find(t => t.TaskID === entityId)) {
+      setTasks(tasks.map(t => 
+        t.TaskID === entityId 
+          ? { ...t, [field]: normalizeFieldValue(field, newValue) }
+          : t
+      ))
+    }
+    
+    // Re-run validation
+    setTimeout(() => {
+      const newErrors = validateData(clients, workers, tasks)
+      setErrors(newErrors)
+    }, 100)
+    
+    setEditingCell(null)
   }
 
   const exportData = () => {
@@ -856,7 +1092,31 @@ export default function DataAlchemist() {
               <div className="flex items-center space-x-2 mb-4">
                 <Sparkles className="w-5 h-5 text-purple-500" />
                 <h3 className="text-lg font-semibold">AI-Powered Search</h3>
+                {apiKeyStatus === 'missing' && (
+                  <span className="badge badge-warning text-xs">API Key Missing</span>
+                )}
               </div>
+              
+              {apiKeyStatus === 'missing' && (
+                <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-yellow-800">Gemini API Key Required</h4>
+                      <p className="text-sm text-yellow-700 mt-1">
+                        To use AI-powered search, you need to set up your Gemini API key.
+                      </p>
+                      <div className="mt-2 text-xs text-yellow-600">
+                        <p>1. Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="underline">Google AI Studio</a></p>
+                        <p>2. Create a <code className="bg-yellow-100 px-1 rounded">.env.local</code> file in your project root</p>
+                        <p>3. Add: <code className="bg-yellow-100 px-1 rounded">NEXT_PUBLIC_GEMINI_API_KEY=your_api_key_here</code></p>
+                        <p>4. Restart your development server</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <div className="flex space-x-2">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
@@ -864,12 +1124,19 @@ export default function DataAlchemist() {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => handleSearchChange(e.target.value)}
-                    placeholder="Search with natural language... e.g., 'tasks with duration > 2'"
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder={apiKeyStatus === 'missing' ? "API key required for AI search" : "Search with natural language... e.g., 'tasks with duration > 2'"}
+                    className={`w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      apiKeyStatus === 'missing' ? 'bg-gray-100 cursor-not-allowed' : ''
+                    }`}
                     onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                    disabled={apiKeyStatus === 'missing'}
                   />
                 </div>
-                <button onClick={handleSearch} className="button button-primary" disabled={isSearching}>
+                <button 
+                  onClick={handleSearch} 
+                  className={`button ${apiKeyStatus === 'missing' ? 'bg-gray-300 cursor-not-allowed' : 'button-primary'}`} 
+                  disabled={isSearching || apiKeyStatus === 'missing'}
+                >
                   {isSearching ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
@@ -886,12 +1153,54 @@ export default function DataAlchemist() {
                 )}
               </div>
               
+              {apiKeyStatus === 'missing' && (
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span className="text-sm text-blue-700">
+                      Local search is still available - try typing in the search box above
+                    </span>
+                  </div>
+                </div>
+              )}
+              
+              {totalRecords === 0 && (
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center">
+                  <FileText className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                  <p className="text-sm text-gray-600">No data loaded yet</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Upload your data files or load sample data to start searching
+                  </p>
+                  <button 
+                    onClick={loadSampleData}
+                    disabled={isProcessing}
+                    className="mt-3 button button-primary text-sm"
+                  >
+                    {isProcessing ? 'Loading...' : 'Load Sample Data'}
+                  </button>
+                </div>
+              )}
+              
               {searchResults.length > 0 && (
                 <div className="mt-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-sm font-medium">Search Results ({searchResults.length})</div>
-                    <div className="text-xs text-gray-500">
-                      {searchQuery.length > 0 && searchQuery.length < 3 ? 'Type more for better results' : 'Showing best matches'}
+                    <div className="flex items-center space-x-2">
+                      {searchSource === 'ai' && (
+                        <div className="flex items-center space-x-1 text-xs text-purple-600">
+                          <Sparkles className="w-3 h-3" />
+                          <span>AI Search</span>
+                        </div>
+                      )}
+                      {searchSource === 'local' && (
+                        <div className="flex items-center space-x-1 text-xs text-blue-600">
+                          <Search className="w-3 h-3" />
+                          <span>Local Search</span>
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        {searchQuery.length > 0 && searchQuery.length < 3 ? 'Type more for better results' : 'Showing best matches'}
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-2 max-h-60 overflow-y-auto border rounded-lg p-2">
@@ -933,11 +1242,22 @@ export default function DataAlchemist() {
                 </div>
               )}
               
-              {searchQuery && searchResults.length === 0 && !isSearching && (
+              {searchQuery && searchResults.length === 0 && !isSearching && totalRecords > 0 && (
                 <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center">
                   <Search className="w-8 h-8 mx-auto mb-2 text-gray-400" />
                   <p className="text-sm text-gray-600">No results found for "{searchQuery}"</p>
                   <p className="text-xs text-gray-500 mt-1">Try different keywords or use the AI Search for more advanced queries</p>
+                </div>
+              )}
+              
+              {searchQuery && !searchQuery.trim() && searchResults.length > 0 && (
+                <div className="mt-4 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span className="text-xs text-blue-700">
+                      Showing all data - type to search
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -1026,18 +1346,26 @@ export default function DataAlchemist() {
                                               onChange={(e) => setEditingCell({ ...editingCell, value: e.target.value })}
                                               className="flex-1 px-2 py-1 border rounded text-sm"
                                               autoFocus
+                                              onKeyPress={(e) => {
+                                                if (e.key === 'Enter') {
+                                                  handleCellEdit(row[currentKey], key, editingCell.value)
+                                                }
+                                              }}
                                             />
                                             <button 
-                                              onClick={() => {
-                                                // Apply edit logic here
-                                                setEditingCell(null)
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                handleCellEdit(row[currentKey], key, editingCell.value)
                                               }}
                                               className="p-1 text-green-600 hover:bg-green-50 rounded"
                                             >
                                               <Save className="w-3 h-3" />
                                             </button>
                                             <button 
-                                              onClick={() => setEditingCell(null)}
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                setEditingCell(null)
+                                              }}
                                               className="p-1 text-red-600 hover:bg-red-50 rounded"
                                             >
                                               <X className="w-3 h-3" />
