@@ -1,4 +1,4 @@
-# Data  - AI Resource Allocation Configurator
+#  AI Data-validator
 
 A Next.js application that uses Gemini AI to help configure and validate resource allocation data.
 
